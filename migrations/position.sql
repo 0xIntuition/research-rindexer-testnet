@@ -17,7 +17,9 @@ deposited_events AS (
         CAST(total_shares AS numeric(78,0)) AS total_shares,
         block_number,
         log_index,
-        block_timestamp
+        block_timestamp,
+        tx_hash,
+        tx_index
     FROM intuition_multi_vault.deposited
 ),
 
@@ -30,7 +32,9 @@ redeemed_events AS (
         CAST(total_shares AS numeric(78,0)) AS total_shares,
         block_number,
         log_index,
-        block_timestamp
+        block_timestamp,
+        tx_hash,
+        tx_index
     FROM intuition_multi_vault.redeemed
 ),
 
@@ -47,7 +51,11 @@ latest_shares AS (
         term_id,
         curve_id,
         total_shares AS shares,
-        block_timestamp AS updated_at
+        block_timestamp AS updated_at,
+        block_number,
+        log_index,
+        tx_hash,
+        tx_index
     FROM all_events
     ORDER BY account_id, term_id, curve_id, block_number DESC, log_index DESC
 ),
@@ -72,6 +80,17 @@ redeem_totals AS (
         COALESCE(SUM(CAST(assets AS numeric(78,0))), 0) AS total_redeem_assets_for_receiver
     FROM intuition_multi_vault.redeemed
     GROUP BY TRIM(sender), term_id, curve_id
+),
+
+-- Get the timestamp of the first deposit for each position
+first_deposit AS (
+    SELECT
+        TRIM(receiver) AS account_id,
+        '0x' || encode(term_id, 'hex') AS term_id,
+        CAST(curve_id AS numeric(78,0)) AS curve_id,
+        MIN(block_timestamp) AS created_at
+    FROM intuition_multi_vault.deposited
+    GROUP BY TRIM(receiver), term_id, curve_id
 )
 
 -- Final join to create the position view
@@ -82,7 +101,12 @@ SELECT
     ls.shares,
     COALESCE(dt.total_deposit_assets_after_total_fees, 0) AS total_deposit_assets_after_total_fees,
     COALESCE(rt.total_redeem_assets_for_receiver, 0) AS total_redeem_assets_for_receiver,
-    ls.updated_at
+    fd.created_at,
+    ls.updated_at,
+    CAST(ls.block_number AS BIGINT) AS block_number,
+    CAST(ls.log_index AS BIGINT) AS log_index,
+    CAST(ls.tx_hash AS TEXT) AS transaction_hash,
+    CAST(ls.tx_index AS BIGINT) AS transaction_index
 FROM latest_shares ls
 LEFT JOIN deposit_totals dt
     ON ls.account_id = dt.account_id
@@ -91,7 +115,11 @@ LEFT JOIN deposit_totals dt
 LEFT JOIN redeem_totals rt
     ON ls.account_id = rt.account_id
     AND ls.term_id = rt.term_id
-    AND ls.curve_id = rt.curve_id;
+    AND ls.curve_id = rt.curve_id
+LEFT JOIN first_deposit fd
+    ON ls.account_id = fd.account_id
+    AND ls.term_id = fd.term_id
+    AND ls.curve_id = fd.curve_id;
 
 -- Create indexes for optimized queries
 CREATE UNIQUE INDEX position_pkey
@@ -105,6 +133,9 @@ CREATE INDEX idx_position_term_id
 
 CREATE INDEX idx_position_updated_at
     ON public.position (updated_at);
+
+CREATE INDEX idx_position_created_at
+    ON public.position (created_at);
 
 -- Create refresh function for the materialized view
 CREATE OR REPLACE FUNCTION refresh_position_view()
