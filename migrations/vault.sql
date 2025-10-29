@@ -11,6 +11,13 @@
 -- Refresh:
 -- SELECT refresh_vault_view();
 
+-- Create vault_type enum
+DO $$ BEGIN
+    CREATE TYPE vault_type AS ENUM ('Atom', 'Triple', 'CounterTriple');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
 -- Drop existing objects
 DROP MATERIALIZED VIEW IF EXISTS public.vault CASCADE;
 DROP FUNCTION IF EXISTS refresh_vault_view() CASCADE;
@@ -26,7 +33,11 @@ latest_share_price AS (
         CAST(share_price AS numeric(78,0)) AS current_share_price,
         CAST(total_assets AS numeric(78,0)) AS total_assets,
         CAST(total_shares AS numeric(78,0)) AS total_shares,
-        vault_type,
+        CASE vault_type
+            WHEN 0 THEN 'Atom'
+            WHEN 1 THEN 'Triple'
+            WHEN 2 THEN 'CounterTriple'
+        END AS vault_type,
         block_number,
         log_index,
         tx_hash,
@@ -129,7 +140,7 @@ COMMENT ON COLUMN public.vault.curve_id IS
 'Bonding curve identifier for the vault (typically 0 for standard curve).';
 
 COMMENT ON COLUMN public.vault.vault_type IS
-'Type of vault: 0=ATOM, 1=TRIPLE (pro), 2=COUNTER_TRIPLE (con).';
+'Type of vault: Atom, Triple (pro), CounterTriple (con).';
 
 COMMENT ON COLUMN public.vault.market_cap IS
 'Calculated market capitalization: (total_shares * current_share_price) / 1e18. Represents total value of all shares.';
