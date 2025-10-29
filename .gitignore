@@ -1,2 +1,3 @@
 .rindexer
-    generated_csv/**/*.txt
+generated_csv/**/*.txt
+migrations/rindexer-data.sql
