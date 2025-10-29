@@ -33,3 +33,14 @@ CREATE TABLE IF NOT EXISTS vault (
   PRIMARY KEY (term_id, curve_id)
 );
 
+CREATE TABLE IF NOT EXISTS term (
+  id TEXT PRIMARY KEY,
+  type term_type NOT NULL,
+  atom_id TEXT,
+  triple_id TEXT,
+  total_assets NUMERIC(78, 0),
+  total_market_cap NUMERIC(78, 0),
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+);
+
