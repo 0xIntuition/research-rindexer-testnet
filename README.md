@@ -6,6 +6,8 @@ Start dev DB
 docker compose up -d
 ```
 
+Open: [local.drizzle.studio](https://local.drizzle.studio/)
+
 ## Import migrations 
 
 ```
