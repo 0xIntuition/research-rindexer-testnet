@@ -1,3 +1,44 @@
+-- Create custom enum types
+DO $$ BEGIN
+    CREATE TYPE vault_type AS ENUM ('Triple', 'CounterTriple', 'Atom');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+DO $$ BEGIN
+    CREATE TYPE account_type AS ENUM ('Default', 'AtomWallet', 'ProtocolVault');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+DO $$ BEGIN
+    CREATE TYPE event_type AS ENUM ('AtomCreated', 'TripleCreated', 'Deposited', 'Redeemed', 'FeesTransfered', 'Initialized');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+DO $$ BEGIN
+    CREATE TYPE atom_type AS ENUM (
+      'Unknown', 'Account', 'Thing', 'ThingPredicate', 'Person', 'PersonPredicate',
+      'Organization', 'OrganizationPredicate', 'Book', 'LikeAction', 'FollowAction', 'Keywords',
+      'Caip10', 'JsonObject', 'TextObject', 'ByteObject'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+DO $$ BEGIN
+    CREATE TYPE atom_resolving_status AS ENUM ('Pending', 'Resolved', 'Failed');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+DO $$ BEGIN
+    CREATE TYPE image_classification AS ENUM ('Safe', 'Unsafe', 'Unknown');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+DO $$ BEGIN
+    CREATE TYPE term_type AS ENUM ('Atom', 'Triple', 'CounterTriple');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
 
 CREATE TABLE "public"."position" (
     "account_id" text NOT NULL,
@@ -44,3 +85,23 @@ CREATE TABLE IF NOT EXISTS term (
   updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
 
+
+
+CREATE TABLE IF NOT EXISTS atom (
+  term_id TEXT PRIMARY KEY NOT NULL,
+  wallet_id TEXT NOT NULL,
+  creator_id TEXT NOT NULL,
+  data TEXT, -- utf8 encoded string
+  raw_data TEXT NOT NULL, -- bytes encoded as hex string
+  type atom_type NOT NULL, -- Unknown as default
+  emoji TEXT,
+  label TEXT,
+  image TEXT,
+  value_id TEXT,
+  block_number NUMERIC(78, 0) NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  transaction_hash TEXT NOT NULL,
+  resolving_status atom_resolving_status NOT NULL DEFAULT 'Pending',
+  log_index BIGINT NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+);
