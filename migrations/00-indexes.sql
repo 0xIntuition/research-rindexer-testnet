@@ -8,14 +8,32 @@
 -- ============================================================================
 
 -- CRITICAL: Composite index for DISTINCT ON query pattern
--- Supports: Finding latest total_shares per position (02-position.sql:60)
+-- Supports: Finding latest total_shares per position (02-position.sql:14-25)
 CREATE INDEX idx_deposited_receiver_term_curve_block_log
     ON intuition_multi_vault.deposited (receiver, term_id, curve_id, block_number DESC, log_index DESC);
 
+-- CRITICAL (COVERING): Same as above but includes columns to avoid table lookups
+-- This is a covering index that includes all columns needed by the latest_deposited CTE
+-- Covers: total_shares, block_timestamp, tx_hash, tx_index
+-- Expected speedup: 2-3x for DISTINCT ON query by avoiding heap fetches
+DROP INDEX IF EXISTS idx_deposited_receiver_term_curve_block_log_covering;
+CREATE INDEX idx_deposited_receiver_term_curve_block_log_covering
+    ON intuition_multi_vault.deposited (receiver, term_id, curve_id, block_number DESC, log_index DESC)
+    INCLUDE (total_shares, block_timestamp, tx_hash, tx_index);
+
 -- HIGH PRIORITY: Composite index for GROUP BY aggregations
--- Supports: Calculating total deposits per position (02-position.sql:71)
+-- Supports: Calculating total deposits per position (02-position.sql:129-141)
 CREATE INDEX idx_deposited_receiver_term_curve
     ON intuition_multi_vault.deposited (receiver, term_id, curve_id);
+
+-- HIGH PRIORITY (COVERING): Same as above but includes assets_after_fees and block_timestamp
+-- This covering index avoids table lookups for deposit aggregation
+-- Covers: assets_after_fees, block_timestamp (for MIN created_at)
+-- Expected speedup: 2-3x for GROUP BY aggregation
+DROP INDEX IF EXISTS idx_deposited_receiver_term_curve_covering;
+CREATE INDEX idx_deposited_receiver_term_curve_covering
+    ON intuition_multi_vault.deposited (receiver, term_id, curve_id)
+    INCLUDE (assets_after_fees, block_timestamp);
 
 -- Individual column indexes for filtering and joins
 CREATE INDEX idx_deposited_receiver
@@ -24,15 +42,40 @@ CREATE INDEX idx_deposited_receiver
 CREATE INDEX idx_deposited_term_id
     ON intuition_multi_vault.deposited (term_id);
 
+-- Expression index for hex-encoded term_id
+-- Caches the result of '0x' || encode(term_id, 'hex') to avoid recomputing
+-- Expected speedup: 20-30% reduction in CPU time for queries using hex encoding
+CREATE INDEX idx_deposited_term_id_hex
+    ON intuition_multi_vault.deposited (('0x' || encode(term_id, 'hex')));
+
 CREATE INDEX idx_deposited_curve_id
     ON intuition_multi_vault.deposited (curve_id);
 
 -- Temporal indexes for time-based queries and MIN aggregations
+-- NOTE: For large tables (3M+ rows), consider replacing these B-tree indexes with BRIN indexes (see below)
 CREATE INDEX idx_deposited_block_timestamp
     ON intuition_multi_vault.deposited (block_timestamp);
 
 CREATE INDEX idx_deposited_block_number
     ON intuition_multi_vault.deposited (block_number DESC);
+
+-- BRIN INDEXES: Optimized for naturally ordered, large tables
+-- BRIN indexes are 100x smaller than B-tree and faster for sequential inserts
+-- Trade-off: Slightly slower for point lookups, but excellent for range scans
+-- Recommended for deposited table with 3M+ rows and continuous growth
+--
+-- To switch from B-tree to BRIN:
+-- 1. Create BRIN indexes below
+-- 2. DROP the B-tree indexes above (idx_deposited_block_timestamp, idx_deposited_block_number)
+-- 3. VACUUM ANALYZE the table
+--
+-- Uncomment these to use BRIN indexes:
+-- DROP INDEX IF EXISTS idx_deposited_block_timestamp;
+-- DROP INDEX IF EXISTS idx_deposited_block_number;
+-- CREATE INDEX idx_deposited_block_timestamp_brin
+--     ON intuition_multi_vault.deposited USING BRIN (block_timestamp) WITH (pages_per_range = 128);
+-- CREATE INDEX idx_deposited_block_number_brin
+--     ON intuition_multi_vault.deposited USING BRIN (block_number) WITH (pages_per_range = 128);
 
 
 -- ============================================================================
@@ -40,14 +83,32 @@ CREATE INDEX idx_deposited_block_number
 -- ============================================================================
 
 -- CRITICAL: Composite index for DISTINCT ON query pattern
--- Supports: Finding latest total_shares per position (02-position.sql:60)
+-- Supports: Finding latest total_shares per position (02-position.sql:29-41)
 CREATE INDEX idx_redeemed_sender_term_curve_block_log
     ON intuition_multi_vault.redeemed (sender, term_id, curve_id, block_number DESC, log_index DESC);
 
+-- CRITICAL (COVERING): Same as above but includes columns to avoid table lookups
+-- This is a covering index that includes all columns needed by the latest_redeemed CTE
+-- Covers: total_shares, block_timestamp, tx_hash, tx_index
+-- Expected speedup: 2-3x for DISTINCT ON query by avoiding heap fetches
+DROP INDEX IF EXISTS idx_redeemed_sender_term_curve_block_log_covering;
+CREATE INDEX idx_redeemed_sender_term_curve_block_log_covering
+    ON intuition_multi_vault.redeemed (sender, term_id, curve_id, block_number DESC, log_index DESC)
+    INCLUDE (total_shares, block_timestamp, tx_hash, tx_index);
+
 -- HIGH PRIORITY: Composite index for GROUP BY aggregations
--- Supports: Calculating total redeems per position (02-position.sql:82)
+-- Supports: Calculating total redeems per position (02-position.sql:146-157)
 CREATE INDEX idx_redeemed_sender_term_curve
     ON intuition_multi_vault.redeemed (sender, term_id, curve_id);
+
+-- HIGH PRIORITY (COVERING): Same as above but includes assets for aggregation
+-- This covering index avoids table lookups for redeem aggregation
+-- Covers: assets (for SUM of total_redeem_assets_for_receiver)
+-- Expected speedup: 2-3x for GROUP BY aggregation
+DROP INDEX IF EXISTS idx_redeemed_sender_term_curve_covering;
+CREATE INDEX idx_redeemed_sender_term_curve_covering
+    ON intuition_multi_vault.redeemed (sender, term_id, curve_id)
+    INCLUDE (assets);
 
 -- Individual column indexes for filtering and joins
 CREATE INDEX idx_redeemed_sender
@@ -56,10 +117,16 @@ CREATE INDEX idx_redeemed_sender
 CREATE INDEX idx_redeemed_term_id
     ON intuition_multi_vault.redeemed (term_id);
 
+-- Expression index for hex-encoded term_id
+-- Caches the result of '0x' || encode(term_id, 'hex') to avoid recomputing
+CREATE INDEX idx_redeemed_term_id_hex
+    ON intuition_multi_vault.redeemed (('0x' || encode(term_id, 'hex')));
+
 CREATE INDEX idx_redeemed_curve_id
     ON intuition_multi_vault.redeemed (curve_id);
 
 -- Temporal indexes for time-based queries and MIN aggregations
+-- NOTE: redeemed table is very small (~10 rows), so B-tree indexes are sufficient
 CREATE INDEX idx_redeemed_block_timestamp
     ON intuition_multi_vault.redeemed (block_timestamp);
 
@@ -92,11 +159,24 @@ CREATE INDEX idx_share_price_vault_type
     ON intuition_multi_vault.share_price_changed (vault_type);
 
 -- Temporal indexes for time-based queries and MIN aggregations
+-- NOTE: For large tables (278k+ rows), consider BRIN indexes for better insert performance
 CREATE INDEX idx_share_price_block_timestamp
     ON intuition_multi_vault.share_price_changed (block_timestamp);
 
 CREATE INDEX idx_share_price_block_number
     ON intuition_multi_vault.share_price_changed (block_number DESC);
+
+-- BRIN INDEXES: Optimized for naturally ordered, large tables
+-- BRIN indexes are 100x smaller than B-tree and faster for sequential inserts
+-- Recommended for share_price_changed table with 278k+ rows
+--
+-- Uncomment these to use BRIN indexes:
+-- DROP INDEX IF EXISTS idx_share_price_block_timestamp;
+-- DROP INDEX IF EXISTS idx_share_price_block_number;
+-- CREATE INDEX idx_share_price_block_timestamp_brin
+--     ON intuition_multi_vault.share_price_changed USING BRIN (block_timestamp) WITH (pages_per_range = 128);
+-- CREATE INDEX idx_share_price_block_number_brin
+--     ON intuition_multi_vault.share_price_changed USING BRIN (block_number) WITH (pages_per_range = 128);
 
 
 -- ============================================================================

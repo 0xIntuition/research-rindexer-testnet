@@ -8,11 +8,12 @@ DROP FUNCTION IF EXISTS refresh_position_view() CASCADE;
 -- Create the position materialized view
 CREATE MATERIALIZED VIEW public.position AS
 WITH
--- Get all deposited events with standardized columns
-deposited_events AS (
-    SELECT
+-- Get latest deposited event per position (most positions only have deposits)
+-- This uses the optimized composite index for DISTINCT ON
+latest_deposited AS (
+    SELECT DISTINCT ON (TRIM(receiver), term_id, curve_id)
         TRIM(receiver) AS account_id,
-        '0x' || encode(term_id, 'hex') AS term_id,
+        '0x' || encode(term_id, 'hex') AS term_id_hex,
         CAST(curve_id AS numeric(78,0)) AS curve_id,
         CAST(total_shares AS numeric(78,0)) AS total_shares,
         block_number,
@@ -21,13 +22,14 @@ deposited_events AS (
         tx_hash,
         tx_index
     FROM intuition_multi_vault.deposited
+    ORDER BY TRIM(receiver), term_id, curve_id, block_number DESC, log_index DESC
 ),
 
--- Get all redeemed events with standardized columns
-redeemed_events AS (
-    SELECT
+-- Get latest redeemed event per position (very few positions have redemptions)
+latest_redeemed AS (
+    SELECT DISTINCT ON (TRIM(sender), term_id, curve_id)
         TRIM(sender) AS account_id,
-        '0x' || encode(term_id, 'hex') AS term_id,
+        '0x' || encode(term_id, 'hex') AS term_id_hex,
         CAST(curve_id AS numeric(78,0)) AS curve_id,
         CAST(total_shares AS numeric(78,0)) AS total_shares,
         block_number,
@@ -36,64 +38,127 @@ redeemed_events AS (
         tx_hash,
         tx_index
     FROM intuition_multi_vault.redeemed
+    ORDER BY TRIM(sender), term_id, curve_id, block_number DESC, log_index DESC
 ),
 
--- Union all events and get the latest total_shares per position
-all_events AS (
-    SELECT * FROM deposited_events
-    UNION ALL
-    SELECT * FROM redeemed_events
-),
-
+-- Combine latest from both tables, taking the most recent event
+-- This avoids UNION ALL of 3M+ rows by comparing only the latest events
 latest_shares AS (
-    SELECT DISTINCT ON (account_id, term_id, curve_id)
-        account_id,
-        term_id,
-        curve_id,
-        total_shares AS shares,
-        block_timestamp AS updated_at,
-        block_number,
-        log_index,
-        tx_hash,
-        tx_index
-    FROM all_events
-    ORDER BY account_id, term_id, curve_id, block_number DESC, log_index DESC
+    SELECT
+        COALESCE(d.account_id, r.account_id) AS account_id,
+        COALESCE(d.term_id_hex, r.term_id_hex) AS term_id,
+        COALESCE(d.curve_id, r.curve_id) AS curve_id,
+        CASE
+            -- If both exist, take the one with higher block_number or log_index
+            WHEN d.block_number IS NOT NULL AND r.block_number IS NOT NULL THEN
+                CASE
+                    WHEN d.block_number > r.block_number THEN d.total_shares
+                    WHEN d.block_number < r.block_number THEN r.total_shares
+                    WHEN d.log_index > r.log_index THEN d.total_shares
+                    ELSE r.total_shares
+                END
+            -- If only deposited exists
+            WHEN d.block_number IS NOT NULL THEN d.total_shares
+            -- If only redeemed exists
+            ELSE r.total_shares
+        END AS shares,
+        CASE
+            WHEN d.block_number IS NOT NULL AND r.block_number IS NOT NULL THEN
+                CASE
+                    WHEN d.block_number > r.block_number THEN d.block_timestamp
+                    WHEN d.block_number < r.block_number THEN r.block_timestamp
+                    WHEN d.log_index > r.log_index THEN d.block_timestamp
+                    ELSE r.block_timestamp
+                END
+            WHEN d.block_number IS NOT NULL THEN d.block_timestamp
+            ELSE r.block_timestamp
+        END AS updated_at,
+        CASE
+            WHEN d.block_number IS NOT NULL AND r.block_number IS NOT NULL THEN
+                CASE
+                    WHEN d.block_number > r.block_number THEN d.block_number
+                    WHEN d.block_number < r.block_number THEN r.block_number
+                    WHEN d.log_index > r.log_index THEN d.block_number
+                    ELSE r.block_number
+                END
+            WHEN d.block_number IS NOT NULL THEN d.block_number
+            ELSE r.block_number
+        END AS block_number,
+        CASE
+            WHEN d.block_number IS NOT NULL AND r.block_number IS NOT NULL THEN
+                CASE
+                    WHEN d.block_number > r.block_number THEN d.log_index
+                    WHEN d.block_number < r.block_number THEN r.log_index
+                    WHEN d.log_index > r.log_index THEN d.log_index
+                    ELSE r.log_index
+                END
+            WHEN d.block_number IS NOT NULL THEN d.log_index
+            ELSE r.log_index
+        END AS log_index,
+        CASE
+            WHEN d.block_number IS NOT NULL AND r.block_number IS NOT NULL THEN
+                CASE
+                    WHEN d.block_number > r.block_number THEN d.tx_hash
+                    WHEN d.block_number < r.block_number THEN r.tx_hash
+                    WHEN d.log_index > r.log_index THEN d.tx_hash
+                    ELSE r.tx_hash
+                END
+            WHEN d.block_number IS NOT NULL THEN d.tx_hash
+            ELSE r.tx_hash
+        END AS tx_hash,
+        CASE
+            WHEN d.block_number IS NOT NULL AND r.block_number IS NOT NULL THEN
+                CASE
+                    WHEN d.block_number > r.block_number THEN d.tx_index
+                    WHEN d.block_number < r.block_number THEN r.tx_index
+                    WHEN d.log_index > r.log_index THEN d.tx_index
+                    ELSE r.tx_index
+                END
+            WHEN d.block_number IS NOT NULL THEN d.tx_index
+            ELSE r.tx_index
+        END AS tx_index
+    FROM latest_deposited d
+    FULL OUTER JOIN latest_redeemed r
+        ON d.account_id = r.account_id
+        AND d.term_id_hex = r.term_id_hex
+        AND d.curve_id = r.curve_id
 ),
 
 -- Aggregate total deposit assets after fees
+-- Reuse latest_deposited to get unique positions, then aggregate all deposits
 deposit_totals AS (
     SELECT
-        TRIM(receiver) AS account_id,
-        '0x' || encode(term_id, 'hex') AS term_id,
-        CAST(curve_id AS numeric(78,0)) AS curve_id,
-        COALESCE(SUM(CAST(assets_after_fees AS numeric(78,0))), 0) AS total_deposit_assets_after_total_fees
-    FROM intuition_multi_vault.deposited
-    GROUP BY TRIM(receiver), term_id, curve_id
+        ld.account_id,
+        ld.term_id_hex AS term_id,
+        ld.curve_id,
+        COALESCE(SUM(CAST(d.assets_after_fees AS numeric(78,0))), 0) AS total_deposit_assets_after_total_fees,
+        MIN(d.block_timestamp) AS created_at  -- Get first deposit timestamp here to avoid another scan
+    FROM latest_deposited ld
+    JOIN intuition_multi_vault.deposited d
+        ON TRIM(d.receiver) = ld.account_id
+        AND d.term_id = decode(substring(ld.term_id_hex from 3), 'hex')  -- Convert hex back to bytea for join
+        AND CAST(d.curve_id AS numeric(78,0)) = ld.curve_id
+    GROUP BY ld.account_id, ld.term_id_hex, ld.curve_id
 ),
 
 -- Aggregate total redeem assets received
+-- Only process positions that actually have redemptions (very small set)
 redeem_totals AS (
     SELECT
-        TRIM(sender) AS account_id,
-        '0x' || encode(term_id, 'hex') AS term_id,
-        CAST(curve_id AS numeric(78,0)) AS curve_id,
-        COALESCE(SUM(CAST(assets AS numeric(78,0))), 0) AS total_redeem_assets_for_receiver
-    FROM intuition_multi_vault.redeemed
-    GROUP BY TRIM(sender), term_id, curve_id
-),
-
--- Get the timestamp of the first deposit for each position
-first_deposit AS (
-    SELECT
-        TRIM(receiver) AS account_id,
-        '0x' || encode(term_id, 'hex') AS term_id,
-        CAST(curve_id AS numeric(78,0)) AS curve_id,
-        MIN(block_timestamp) AS created_at
-    FROM intuition_multi_vault.deposited
-    GROUP BY TRIM(receiver), term_id, curve_id
+        lr.account_id,
+        lr.term_id_hex AS term_id,
+        lr.curve_id,
+        COALESCE(SUM(CAST(r.assets AS numeric(78,0))), 0) AS total_redeem_assets_for_receiver
+    FROM latest_redeemed lr
+    JOIN intuition_multi_vault.redeemed r
+        ON TRIM(r.sender) = lr.account_id
+        AND r.term_id = decode(substring(lr.term_id_hex from 3), 'hex')
+        AND CAST(r.curve_id AS numeric(78,0)) = lr.curve_id
+    GROUP BY lr.account_id, lr.term_id_hex, lr.curve_id
 )
 
 -- Final join to create the position view
+-- Note: deposit_totals now includes created_at, eliminating the need for first_deposit CTE
 SELECT
     ls.account_id,
     ls.term_id,
@@ -101,7 +166,7 @@ SELECT
     ls.shares,
     COALESCE(dt.total_deposit_assets_after_total_fees, 0) AS total_deposit_assets_after_total_fees,
     COALESCE(rt.total_redeem_assets_for_receiver, 0) AS total_redeem_assets_for_receiver,
-    fd.created_at,
+    dt.created_at,  -- Now comes from deposit_totals
     ls.updated_at,
     CAST(ls.block_number AS BIGINT) AS block_number,
     CAST(ls.log_index AS BIGINT) AS log_index,
@@ -115,11 +180,7 @@ LEFT JOIN deposit_totals dt
 LEFT JOIN redeem_totals rt
     ON ls.account_id = rt.account_id
     AND ls.term_id = rt.term_id
-    AND ls.curve_id = rt.curve_id
-LEFT JOIN first_deposit fd
-    ON ls.account_id = fd.account_id
-    AND ls.term_id = fd.term_id
-    AND ls.curve_id = fd.curve_id;
+    AND ls.curve_id = rt.curve_id;
 
 -- Create indexes for optimized queries
 CREATE UNIQUE INDEX position_pkey
@@ -136,6 +197,27 @@ CREATE INDEX idx_position_updated_at
 
 CREATE INDEX idx_position_created_at
     ON public.position (created_at);
+
+-- Partial indexes for active positions (shares > 0)
+-- These are much smaller and faster for queries that only care about active positions
+-- Expected size: 50-80% smaller than full indexes
+CREATE INDEX idx_position_active_account
+    ON public.position (account_id)
+    WHERE shares > 0;
+
+CREATE INDEX idx_position_active_term
+    ON public.position (term_id)
+    WHERE shares > 0;
+
+CREATE INDEX idx_position_active_account_term
+    ON public.position (account_id, term_id)
+    WHERE shares > 0;
+
+-- Partial index for positions with significant deposits
+-- Useful for filtering out dust positions or test transactions
+CREATE INDEX idx_position_significant
+    ON public.position (account_id, term_id, curve_id)
+    WHERE total_deposit_assets_after_total_fees > 1000000000000000000;  -- > 1 token (18 decimals)
 
 -- Create refresh function for the materialized view
 CREATE OR REPLACE FUNCTION refresh_position_view()

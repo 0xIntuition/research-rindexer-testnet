@@ -8,6 +8,25 @@ services:
       context: ./postgres/
     shm_size: 1g
     restart: always
+    # Apply performance tuning via command-line parameters (preserves base config)
+    command: >
+      postgres
+      -c listen_addresses='*'
+      -c work_mem=256MB
+      -c maintenance_work_mem=1GB
+      -c shared_buffers=2GB
+      -c effective_cache_size=6GB
+      -c max_parallel_workers_per_gather=4
+      -c max_parallel_workers=8
+      -c max_worker_processes=8
+      -c parallel_setup_cost=100
+      -c parallel_tuple_cost=0.01
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c checkpoint_completion_target=0.9
+      -c track_io_timing=on
+      -c log_min_duration_statement=5000
+      -c autovacuum_vacuum_cost_limit=2000
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
