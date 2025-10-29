@@ -28,6 +28,7 @@ gunzip -c data.sql.gz > data.sql
 
 PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f schema.sql
 PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f data.sql
+PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/00-indexes.sql
 PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/01-crypto.sql
 PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/02-position.sql
 PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/03-vault.sql
