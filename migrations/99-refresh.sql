@@ -16,6 +16,7 @@
 --   1. Base views: position, atom, triple
 --   2. First-level aggregates: vault, triple_vault
 --   3. Second-level aggregates: term, triple_term
+--   4. Third-level aggregates: predicate_object, subject_predicate
 --
 -- Uses CONCURRENT refresh mode to avoid locking views during refresh.
 -- Continues refreshing remaining views even if individual refreshes fail.
@@ -193,6 +194,52 @@ BEGIN
         duration := EXTRACT(EPOCH FROM (end_time - start_time));
 
         view_name := 'triple_term';
+        duration_seconds := duration;
+        status := 'error';
+        error_message := SQLERRM;
+        RETURN NEXT;
+    END;
+
+    -- Refresh predicate_object (depends on triple and triple_term)
+    BEGIN
+        start_time := clock_timestamp();
+        REFRESH MATERIALIZED VIEW CONCURRENTLY public.predicate_object;
+        end_time := clock_timestamp();
+        duration := EXTRACT(EPOCH FROM (end_time - start_time));
+
+        view_name := 'predicate_object';
+        duration_seconds := duration;
+        status := 'success';
+        error_message := NULL;
+        RETURN NEXT;
+    EXCEPTION WHEN OTHERS THEN
+        end_time := clock_timestamp();
+        duration := EXTRACT(EPOCH FROM (end_time - start_time));
+
+        view_name := 'predicate_object';
+        duration_seconds := duration;
+        status := 'error';
+        error_message := SQLERRM;
+        RETURN NEXT;
+    END;
+
+    -- Refresh subject_predicate (depends on triple and triple_term)
+    BEGIN
+        start_time := clock_timestamp();
+        REFRESH MATERIALIZED VIEW CONCURRENTLY public.subject_predicate;
+        end_time := clock_timestamp();
+        duration := EXTRACT(EPOCH FROM (end_time - start_time));
+
+        view_name := 'subject_predicate';
+        duration_seconds := duration;
+        status := 'success';
+        error_message := NULL;
+        RETURN NEXT;
+    EXCEPTION WHEN OTHERS THEN
+        end_time := clock_timestamp();
+        duration := EXTRACT(EPOCH FROM (end_time - start_time));
+
+        view_name := 'subject_predicate';
         duration_seconds := duration;
         status := 'error';
         error_message := SQLERRM;
