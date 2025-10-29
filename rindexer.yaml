@@ -1,0 +1,34 @@
+name: intuition
+project_type: no-code
+config: {}
+timestamps: true
+networks:
+  - name: testnet
+    chain_id: 13579
+    rpc: https://testnet.rpc.intuition.systems/http
+storage:
+  postgres:
+    enabled: true
+native_transfers:
+  enabled: false
+contracts:
+  - name: MultiVault
+    details:
+      - network: testnet
+        address: 0x2Ece8D4dEdcB9918A398528f3fa4688b1d2CAB91
+        start_block: '8092570'
+    abi: ./abis/MultiVault.json
+    include_events:
+      - name: AtomCreated
+        timestamps: true
+      - name: TripleCreated
+        timestamps: true
+      - name: Deposited
+        timestamps: true
+      - name: Redeemed
+        timestamps: true
+      - name: SharePriceChanged
+        timestamps: true
+
+global:
+  health_port: 8888
