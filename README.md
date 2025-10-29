@@ -37,6 +37,7 @@ PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrati
 PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/06-triple.sql
 PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/07-triple_vault.sql
 PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/08-triple_term.sql
+PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/99-refresh.sql
 
 ```
 ```
