@@ -24,10 +24,16 @@ PGPASSWORD=rindexer pg_dump --dbname=postgres --host=localhost --port=5440 --use
 ## Import migrations 
 
 ```
-PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/position.sql
-PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/vault.sql
-PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/term.sql
-PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/atom.sql
+gunzip -c data.sql.gz > data.sql
+
+PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f schema.sql
+PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f data.sql
+PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/01-crypto.sql
+PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/02-position.sql
+PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/03-vault.sql
+PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/04-term.sql
+PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/05-atom.sql
+PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/06-triple.sql
 
 ```
 ```

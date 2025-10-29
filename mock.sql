@@ -105,3 +105,16 @@ CREATE TABLE IF NOT EXISTS atom (
   log_index BIGINT NOT NULL,
   updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS triple (
+  term_id TEXT PRIMARY KEY NOT NULL,
+  creator_id TEXT NOT NULL,
+  subject_id TEXT NOT NULL,
+  predicate_id TEXT NOT NULL,
+  object_id TEXT NOT NULL,
+  counter_term_id TEXT NOT NULL, -- 'Pending' as default
+  block_number NUMERIC(78, 0) NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  transaction_hash TEXT NOT NULL
+);
+
