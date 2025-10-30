@@ -6,27 +6,36 @@ services:
   postgresql:
     build:
       context: ./postgres/
-    shm_size: 1g
+    shm_size: 8g
     restart: always
     # Apply performance tuning via command-line parameters (preserves base config)
+    # Maximized for 12-core CPU with 23.68GB Docker RAM allocation
     command: >
       postgres
       -c listen_addresses='*'
-      -c work_mem=256MB
-      -c maintenance_work_mem=1GB
-      -c shared_buffers=2GB
-      -c effective_cache_size=6GB
-      -c max_parallel_workers_per_gather=4
-      -c max_parallel_workers=8
-      -c max_worker_processes=8
+      -c shared_buffers=6GB
+      -c effective_cache_size=18GB
+      -c maintenance_work_mem=2GB
+      -c work_mem=512MB
+      -c max_worker_processes=12
+      -c max_parallel_workers=12
+      -c max_parallel_workers_per_gather=6
+      -c max_parallel_maintenance_workers=4
       -c parallel_setup_cost=100
       -c parallel_tuple_cost=0.01
       -c random_page_cost=1.1
       -c effective_io_concurrency=200
+      -c wal_buffers=16MB
       -c checkpoint_completion_target=0.9
+      -c default_statistics_target=100
       -c track_io_timing=on
       -c log_min_duration_statement=5000
       -c autovacuum_vacuum_cost_limit=2000
+      -c autovacuum_max_workers=4
+      -c max_connections=200
+      -c statement_timeout=900000
+      -c idle_in_transaction_session_timeout=90000
+      -c lock_timeout=90000
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:

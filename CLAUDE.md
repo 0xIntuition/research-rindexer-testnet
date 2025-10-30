@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an **Intuition Testnet Materialized Views** project that indexes blockchain data from the Intuition protocol's MultiVault smart contract and transforms it into optimized PostgreSQL materialized views for efficient querying.
+This is an **Intuition Testnet Real-Time Indexer** project that indexes blockchain data from the Intuition protocol's MultiVault smart contract and transforms it into optimized PostgreSQL tables with real-time updates via triggers.
 
-**Stack**: Rindexer (v0.27.0) + PostgreSQL 16 + Docker + Drizzle ORM
+**Stack**: Rindexer (v0.27.0) + PostgreSQL 16 + Docker + Drizzle ORM + Database Triggers
 
 **Contract**: MultiVault at `0x2Ece8D4dEdcB9918A398528f3fa4688b1d2CAB91` on testnet (chain ID 13579)
 
@@ -24,36 +24,12 @@ gunzip -c migrations/rindexer-data.sql.gz > migrations/rindexer-data.sql
 # Run migrations sequentially
 PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/rindexer-schema.sql
 PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/rindexer-data.sql
-PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/00-indexes.sql
 PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/01-crypto.sql
-PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/02-position.sql
-PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/03-vault.sql
-PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/04-term.sql
-PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/05-atom.sql
-PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/06-triple.sql
-PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/07-triple_vault.sql
-PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/08-triple_term.sql
-PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/09-predicate-aggregates.sql
-PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/99-refresh.sql
+PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/02-tables.sql
+PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/03-trigger-functions.sql
 ```
 
-### Refresh Materialized Views
-
-```sql
--- Refresh all views in dependency order
-SELECT * FROM refresh_all_views();
-
--- Or refresh individual views (must follow dependency order)
-SELECT refresh_position_view();
-SELECT refresh_vault_view();
-SELECT refresh_term_view();
-SELECT refresh_atom_view();
-SELECT refresh_triple_view();
-SELECT refresh_triple_vault_view();
-SELECT refresh_triple_term_view();
-SELECT refresh_predicate_object_view();
-SELECT refresh_subject_predicate_view();
-```
+**Note**: With trigger-based tables, data updates happen automatically in real-time as rindexer inserts events. No manual refresh operations are required.
 
 ### Rindexer Indexing
 
@@ -102,47 +78,51 @@ Blockchain Events (MultiVault Contract)
 Rindexer Indexer (indexes 5 event types)
     ↓
 Raw Event Tables (intuition_multi_vault schema)
-    ├── atom_created
-    ├── triple_created
-    ├── deposited
-    ├── redeemed
-    └── share_price_changed
+    ├── atom_created       → triggers update_atom()
+    ├── triple_created     → triggers update_triple()
+    ├── deposited          → triggers update_position_deposit()
+    ├── redeemed           → triggers update_position_redeem()
+    └── share_price_changed → triggers update_vault_from_share_price()
     ↓
-Materialized Views (public schema) - 3-Level Dependency Hierarchy
+Trigger Functions (cascade updates through 4 levels)
+    ↓
+Analytics Tables (public schema) - Real-time, no manual refresh
 ```
 
-### Materialized View Dependency Hierarchy
+### Trigger-Based Table Dependency Hierarchy
 
-**Level 0 (Base views - no dependencies):**
-- `atom` - Entities in knowledge graph
-- `triple` - Relationships between atoms (uses Python UDF for triple ID calculation)
-- `position` - User holdings aggregated from deposits/redemptions
+**Level 0 (Base tables - triggered by raw events):**
+- `atom` - Entities in knowledge graph (triggered by atom_created)
+- `triple` - Relationships between atoms (triggered by triple_created, uses Python UDF)
+- `position` - User holdings (triggered by deposited + redeemed events)
 
-**Level 1 (depends on Level 0):**
-- `vault` - Vault state and metrics (depends on position + share_price_changed)
-- `triple_vault` - Triple vault aggregations (depends on triple + vault)
+**Level 1 (Cascading triggers from Level 0):**
+- `vault` - Vault state and metrics (triggered by share_price_changed + position changes)
+- `triple_vault` - Triple vault aggregations (triggered by triple + vault changes)
 
-**Level 2 (depends on Level 1):**
-- `term` - Term-level aggregations (depends on vault)
-- `triple_term` - Triple term aggregations (depends on triple_vault)
+**Level 2 (Cascading triggers from Level 1):**
+- `term` - Term-level aggregations (triggered by vault changes)
+- `triple_term` - Triple term aggregations (triggered by triple_vault changes)
 
-**Level 3 (analytics views):**
-- `predicate_object` - Predicate-object relationship analytics
-- `subject_predicate` - Subject-predicate relationship analytics
+**Level 3 (Analytics tables - triggered by Level 2):**
+- `predicate_object` - Predicate-object relationship analytics (triggered by triple + triple_term changes)
+- `subject_predicate` - Subject-predicate relationship analytics (triggered by triple + triple_term changes)
 
-**Critical**: Views must be refreshed in dependency order. Use `refresh_all_views()` to handle this automatically.
+**Critical**: All updates happen automatically via cascading triggers. Tables are always up-to-date with latest blockchain events, with out-of-order event handling via block/log_index comparison.
 
 ### Key Architectural Patterns
 
-1. **CONCURRENT Refresh**: All materialized views support `REFRESH MATERIALIZED VIEW CONCURRENTLY`, allowing queries during refresh. Requires unique indexes on primary keys.
+1. **Real-Time Trigger Updates**: PostgreSQL triggers automatically update analytics tables as raw events arrive. No manual refresh operations required. Updates cascade through 4 dependency levels.
 
-2. **Covering Indexes**: Indexes include computed columns to avoid table lookups (see `migrations/00-indexes.sql` for extensive documentation).
+2. **Out-of-Order Event Handling**: All tables include `last_updated_block` and `last_updated_log_index` tracking columns. Triggers use conditional logic to only update if new events are chronologically later: `(block_number, log_index)` tuple comparison.
 
-3. **DISTINCT ON Optimization**: Find latest events efficiently using composite indexes with `(vault_id, block_number DESC, log_index DESC)`.
+3. **Aggregation Triggers**: Higher-level tables (term, triple_term, analytics) use triggers that recalculate GROUP BY aggregations when upstream tables change. Ensures consistency across dependency hierarchy.
 
-4. **Python UDFs**: Cryptographic functions (Keccak-256) implemented as PostgreSQL functions using Python's `eth_hash` library. See `migrations/01-crypto.sql`.
+4. **Position Table Complexity**: Separate triggers for deposit and redeem events. Maintains both "current shares" (from latest event) and "historical totals" (accumulated across all events), handling out-of-order arrivals correctly.
 
-5. **Idempotent Migrations**: All migrations use `DROP IF EXISTS` for safe re-runs.
+5. **Python UDFs**: Cryptographic functions (Keccak-256) implemented as PostgreSQL functions using Python's `eth_hash` library. Called from triggers for counter-triple ID calculation. See `migrations/01-crypto.sql`.
+
+6. **Idempotent Migrations**: All migrations use `DROP IF EXISTS` and `ON CONFLICT DO UPDATE` for safe re-runs and upserts.
 
 ## Database Schema Organization
 
@@ -152,18 +132,24 @@ Auto-generated by rindexer. Contains 5 event tables:
 - Data characteristics: deposited (3M+ rows), share_price_changed (278k+ rows), redeemed (~10 rows)
 
 ### `public` Schema (Analytics)
-Contains 9 materialized views for aggregated data. See dependency hierarchy above.
+Contains 9 regular tables updated in real-time via triggers. See dependency hierarchy above.
 
 Custom types defined:
-- `vault_type`: ENUM('atom', 'triple', 'counter_triple')
-- `term_type`: ENUM('atom', 'triple', 'counter_triple')
-- `atom_type`: ENUM('thing', 'person', 'organization', 'account')
-- `atom_resolving_status`: ENUM('pending', 'resolved')
+- `vault_type`: ENUM('Atom', 'Triple', 'CounterTriple')
+- `term_type`: ENUM('Atom', 'Triple', 'CounterTriple')
+- `atom_type`: ENUM('Unknown', 'Account', 'Thing', 'Person', 'Organization', etc.)
+- `atom_resolving_status`: ENUM('Pending', 'Resolved', 'Failed')
 
 Helper functions:
-- `keccak256(text)` - Compute Keccak-256 hash
-- `calculateCounterTripleId(numeric)` - Calculate counter-triple vault ID
-- `safe_utf8_decode(bytea)` - Decode bytea to UTF-8 with error handling
+- `keccak256(bytea)` - Compute Keccak-256 hash (Python UDF)
+- `calculateCounterTripleId(bytea)` - Calculate counter-triple vault ID (Python UDF)
+- `safe_utf8_decode(bytea)` - Decode bytea to UTF-8 with error handling (PL/pgSQL)
+
+Trigger functions (see `migrations/03-trigger-functions.sql`):
+- Level 0: `update_atom()`, `update_triple()`, `update_position_deposit()`, `update_position_redeem()`
+- Level 1: `update_vault_from_share_price()`, `update_vault_position_count()`, `update_triple_vault_from_vault()`, `update_triple_vault_from_triple()`
+- Level 2: `update_term_from_vault()`, `update_triple_term_from_triple_vault()`
+- Level 3: `update_predicate_object_from_triple()`, `update_predicate_object_from_triple_term()`, `update_subject_predicate_from_triple()`, `update_subject_predicate_from_triple_term()`
 
 ## Domain Model
 
@@ -191,23 +177,51 @@ Helper functions:
 
 ### Index Strategy
 
-See `migrations/00-indexes.sql` for detailed documentation. Index types used:
+See `migrations/00-indexes.sql` for detailed documentation on raw event table indexes.
+See `migrations/02-tables.sql` for analytics table indexes.
 
-1. **Composite Indexes**: For DISTINCT ON queries (CRITICAL priority)
-   - Example: `(vault_id, block_number DESC, log_index DESC)`
-   - Avoids expensive sorts on large tables
+Index types used:
 
-2. **Covering Indexes**: Include computed columns to avoid heap fetches
-   - Example: `(vault_id) INCLUDE (shares)` for sum aggregations
+1. **Composite Indexes on Raw Events**: For efficient DISTINCT ON queries in original trigger logic
+   - Example: `(receiver, term_id, curve_id, block_number DESC, log_index DESC)` on deposited table
+   - Critical for position calculation triggers
 
-3. **Partial Indexes**: For active positions
-   - Example: `WHERE shares > 0` reduces index size significantly
+2. **Primary Key Indexes on Analytics Tables**: Enable efficient ON CONFLICT DO UPDATE in triggers
+   - Example: `(account_id, term_id, curve_id)` on position table
+   - Example: `(term_id, curve_id)` on vault table
 
-4. **BRIN Indexes**: Recommended for very large tables with sequential inserts
-   - Block Range INdexes for time-series data
+3. **Partial Indexes**: For active positions and significant holdings
+   - Example: `WHERE shares > 0` on position table
+   - Reduces index size by 20-50%
 
-5. **Expression Indexes**: For hex-encoded lookups
+4. **Covering Indexes**: For analytics queries (market cap, position counts)
+   - Example: `(market_cap DESC)` on vault table
+   - Example: `(total_market_cap DESC)` on term table
+
+5. **Expression Indexes on Raw Events**: For hex-encoded lookups
    - Example: `encode(term_id, 'hex')` for term ID queries
+
+### Trigger Performance Considerations
+
+**Per-Event Overhead**:
+- Each raw event triggers 1-7 function executions cascading through dependency hierarchy
+- Worst case: `deposited` event on triple vault executes 7 triggers (position → vault → term + triple_vault → triple_term → analytics)
+- Average case: ~2-3 trigger executions per event
+
+**Optimization**:
+- Triggers use conditional logic to skip unnecessary updates (out-of-order events)
+- Aggregation queries are kept simple (avoid complex CTEs in trigger context)
+- Indexes on primary keys enable fast ON CONFLICT lookups
+- Position count recalculations use covering indexes
+
+**Monitoring**:
+```sql
+-- Check trigger execution (if performance issues arise)
+SELECT schemaname, tablename, n_tup_ins, n_tup_upd
+FROM pg_stat_user_tables
+WHERE schemaname = 'public'
+ORDER BY n_tup_ins + n_tup_upd DESC;
+```
 
 ### PostgreSQL Tuning (docker-compose.yml)
 

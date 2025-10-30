@@ -20,3 +20,16 @@ RETURNS text AS $$
 
     return '0x' + result.hex()
 $$ LANGUAGE plpython3u IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION safe_utf8_decode(data bytea)
+RETURNS text
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+BEGIN
+    RETURN convert_from(data, 'UTF8');
+EXCEPTION
+    WHEN OTHERS THEN
+        RETURN NULL;
+END;
+$$;

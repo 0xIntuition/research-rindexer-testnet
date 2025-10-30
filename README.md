@@ -17,15 +17,8 @@ PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrati
 PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/rindexer-data.sql
 PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/00-indexes.sql
 PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/01-crypto.sql
-PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/02-position.sql
-PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/03-vault.sql
-PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/04-term.sql
-PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/05-atom.sql
-PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/06-triple.sql
-PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/07-triple_vault.sql
-PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/08-triple_term.sql
-PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/09-predicate-aggregates.sql
-PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/99-refresh.sql
+PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/02-tables.sql
+PGPASSWORD=rindexer psql -h localhost -p 5440 -U postgres -d postgres -f migrations/03-functions.sql
 ```
 
 ## Update views
